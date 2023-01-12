@@ -1,6 +1,8 @@
 package com.spz;
 
+import com.spz.annotatoons.SPZAutowired;
 import com.spz.annotatoons.SPZController;
+import com.spz.annotatoons.SPZRequestMapping;
 import com.spz.annotatoons.SPZService;
 
 import javax.servlet.ServletConfig;
@@ -9,6 +11,7 @@ import javax.servlet.http.HttpServlet;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.net.URL;
 import java.util.*;
@@ -34,12 +37,56 @@ public class SpringServletV2 extends HttpServlet {
         //完成依赖注入
         doAutowired();
         //初始化handlerMapping
-//        initHandlerMapping();
+        initHandlerMapping();
         System.out.println("GPSpring framework is init");
+    }
+
+    private void initHandlerMapping() {
+
+        if(ioc.isEmpty())return;
+        for (Map.Entry<String, Object> entry : ioc.entrySet()) {
+            Class<? extends Map.Entry> clazz = entry.getClass();
+            if(!clazz.isAnnotationPresent(SPZController.class)){
+                continue;
+            }
+            //获取类上的baseurl
+            String baseUrl = "";
+            if(clazz.isAnnotationPresent(SPZRequestMapping.class)){
+                SPZRequestMapping requestMapping = clazz.getAnnotation(SPZRequestMapping.class);
+                baseUrl = requestMapping.value();
+            }
+            //获取方法上的url
+            for (Method method : clazz.getMethods()) {
+                if(!method.isAnnotationPresent(SPZRequestMapping.class)){
+                    continue;
+                }
+                SPZRequestMapping mapping = method.getAnnotation(SPZRequestMapping.class);
+                String url = ("/"+baseUrl+mapping.value()).replaceAll("/+","/");
+                handlerMapping.put(url,method);
+                System.out.println("Mapped:"+url+","+method);
+            }
+        }
+
     }
 
     private void doAutowired() {
         for (Map.Entry<String, Object> entry : ioc.entrySet()) {
+            Field[] fields = entry.getValue().getClass().getDeclaredFields();
+            for (Field field : fields) {
+                if(!field.isAnnotationPresent(SPZAutowired.class)){continue;}
+                SPZAutowired autowired = field.getAnnotation(SPZAutowired.class);
+                String beanName = autowired.value().trim();
+                if("".equals(beanName)){
+                    beanName = field.getType().getName();
+                }
+                //如果是public以外的类型只要加了AutoWired都要进行赋值
+                field.setAccessible(true);
+                try {
+                    field.set(entry.getValue(),ioc.get(beanName));
+                } catch (IllegalAccessException e) {
+                    e.printStackTrace();
+                }
+            }
         }
     }
 
