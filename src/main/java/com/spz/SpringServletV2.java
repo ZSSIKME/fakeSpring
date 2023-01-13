@@ -1,17 +1,18 @@
 package com.spz;
 
-import com.spz.annotatoons.SPZAutowired;
-import com.spz.annotatoons.SPZController;
-import com.spz.annotatoons.SPZRequestMapping;
-import com.spz.annotatoons.SPZService;
+import com.spz.annotatoons.*;
 
 import javax.servlet.ServletConfig;
 import javax.servlet.ServletException;
 import javax.servlet.http.HttpServlet;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.lang.annotation.Annotation;
 import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.net.URL;
 import java.util.*;
@@ -25,6 +26,72 @@ public class SpringServletV2 extends HttpServlet {
     private Map<String,Object> ioc = new HashMap<String,Object>();
     //保存url和方法对应的关系
     private Map<String, Method> handlerMapping = new HashMap<>();
+
+    @Override
+    protected void doGet(HttpServletRequest req, HttpServletResponse resp) {
+        try {
+            doPost(req, resp);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    @Override
+    protected void doPost(HttpServletRequest req, HttpServletResponse resp){
+        try {
+            doDispatch(req,resp);
+        } catch (InvocationTargetException e) {
+            e.printStackTrace();
+        } catch (IllegalAccessException e) {
+            e.printStackTrace();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void doDispatch(HttpServletRequest req, HttpServletResponse resp) throws InvocationTargetException, IllegalAccessException, IOException {
+        //获取url
+        String url = req.getRequestURI();
+        String contextPath = req.getContextPath();
+        url = url.replaceAll(contextPath, "").replaceAll("/+", "");
+        //判断handlerMapping中是否有对应的url
+        if(!handlerMapping.containsKey(url)){
+            resp.getWriter().write("404 not found");
+            return;
+        }
+        //对数据参数进行动态设置
+        Method method = this.handlerMapping.get(url);
+        //执行method方法
+        Map<String,String[]> params = req.getParameterMap();
+        Class<?>[] parameterTypes = method.getParameterTypes();
+        Object[] paramValues = new Object[parameterTypes.length];
+        //根据参数动态设置
+        for (int i = 0; i < parameterTypes.length; i++) {
+            Class<?> parameterType = parameterTypes[i];
+
+            if(parameterType == HttpServletRequest.class){
+                paramValues[i] = req;
+            }else if(parameterType == HttpServletResponse.class){
+                paramValues[i] = resp;
+            } else if (parameterType == String.class) {
+                //提取方法中加注解的参数
+                Annotation[][] pa = method.getParameterAnnotations();
+                for (int j = 0; j < pa.length; j++) {
+                    for (Annotation a : pa[i]) {
+                        if(a instanceof SPZRequestParam){
+                            String value = ((SPZRequestParam) a).value().replaceAll("\\[|\\]","").replaceAll("\\s",",");
+                            paramValues[i] = value;
+                        }
+                    }
+                }
+
+            }
+        }
+
+        //获取beanName
+        String beanName = toLowerFirstCase(method.getDeclaringClass().getSimpleName());
+        method.invoke(ioc.get(beanName),paramValues);
+    }
 
     @Override
     public void init(ServletConfig config) throws ServletException {
